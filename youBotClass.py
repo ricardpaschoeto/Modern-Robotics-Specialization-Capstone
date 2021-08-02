@@ -108,14 +108,14 @@ class youBot:
         Vb6 = np.array([0, 0, Vb[0], Vb[1], Vb[2], 0])
         se_matrix = mr.VecTose3(Vb6)
         T = mr.MatrixExp6(se_matrix)
-        Tsb = Tsb @ T
+        Tsb_adv = Tsb @ T
         
         if Vb[0] == 0.0:        
             deltaqb = np.array([0,Vb[1],Vb[2]])
         else:
             deltaqb = np.array([Vb[0], (Vb[1]*np.sin(Vb[0]) + Vb[2]*(np.cos(Vb[0])-1))/Vb[0],
                                 (Vb[2]*np.sin(Vb[0]) + Vb[1]*(1-np.cos(Vb[0])))/Vb[0]])
-        phi = np.arccos(Tsb[0][0])
+        phi = np.arccos(Tsb_adv[0][0])
         deltaq = np.array([[1,0,0],[0,np.cos(phi),-np.sin(phi)],[0,np.sin(phi),np.cos(phi)]]) @ deltaqb
         
         return deltaq
@@ -130,13 +130,13 @@ class youBot:
         
         deltaq = self.q_step(Tsb, speeds, dt, speed_limit)
         
-        q0 = robot_config[0:3]
-        J0 = robot_config[3:8]
-        W0 = robot_config[8:12]
+        q = robot_config[0:3]
+        J = robot_config[3:8]
+        W = robot_config[8:12]
         
-        q = q0 + deltaq
-        J = J0 + speeds[:5]*dt
-        W = W0 + speeds[5:]*dt
+        q = q + deltaq
+        J = J + speeds[:5]*dt
+        W = W + speeds[5:]*dt
         
         new_robot_config = np.concatenate((q,J,W, np.array([gripper])))
         self.write_result(new_robot_config, 'body.csv')
@@ -167,7 +167,7 @@ class youBot:
         Rtse,_ = mr.TransToRp(Tse_initial)
         pstd = np.array([self.init_cube_config[0], self.init_cube_config[1], self.init_cube_config[2] + 0.2])
 
-        Rstd = np.array([[ np.cos(teta), 0,  np.sin(teta)],
+        Rstd = np.array([[np.cos(teta), 0,  np.sin(teta)],
                         [            0, 1,             0],
                         [-np.sin(teta), 0,  np.cos(teta)]])
                       
@@ -364,7 +364,7 @@ def test_next_state():
     if os.path.isfile('body.csv'):
         os.remove('body.csv')
     # chassis phi, chassis x, chassis y, J1, J2, J3, J4, J5, W1, W2, W3, W4
-    robot_config01 = np.array([-0.75959, -0.47352, 0.058167, 0.80405, -0.91639, -0.011436, 0.054333, 0.00535, 1.506, -1.3338, 1.5582, 1.6136])
+    robot_config01 = np.array([-0.75959, -0.47352, 0.058167, 0.80405, -0.91639, -0.011436, 0.054333, 0.00535, -np.pi/4, np.pi/4, -np.pi/4, np.pi/4])
     robot_config02 = np.zeros((12,))
     ## joint arms velocity and wheels velocitity
     velocity1 = np.array([0, 0, 0, 0, 0, 10,10,10,10])
@@ -377,7 +377,7 @@ def test_next_state():
 
 def test_trajectory_generator():
     # chassis phi, chassis x, chassis y, J1, J2, J3, J4, J5, W1, W2, W3, W4
-    robot_config01 = np.array([0, 0, 0, 0, 0, 0, 0, 0, 1.506, -1.3338, 1.5582, 1.6136])
+    robot_config01 = np.array([0, 0, 0, 0, 0, 0, 0, 0, -np.pi/4, np.pi/4, -np.pi/4, np.pi/4])
     robot_config02 = np.zeros((12,))
 
     robot = youBot(initial_youBot_conf=robot_config01)
@@ -385,7 +385,7 @@ def test_trajectory_generator():
     robot.TrajectoryGenerator()
 
 def test_feedbackcontrol():
-    robot_config01 = np.array([0,0,0,0,0,0.2,-1.6,0, 1.506, -1.3338, 1.5582, 1.6136])
+    robot_config01 = np.array([0,0,0,0,0,0.2,-1.6,0, -np.pi/4, np.pi/4, -np.pi/4, np.pi/4])
     robot_config02 = np.zeros((12,))
 
     robot = youBot(initial_youBot_conf=robot_config01)
