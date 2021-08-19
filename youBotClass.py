@@ -22,11 +22,13 @@ class youBot:
         self.w = 0.15 # side-to-side distance between wheels
         self.r = 0.0475 # The radius of each wheel
         self.z = 0.0963 # the height of the {b} frame above the floor
+        self.integral = 0.
         self.robot_config = initial_youBot_conf
         self.desired_cube_config = desired_cube_config
         self.init_cube_config = init_cube_config
          
-        
+        self.robot_configs = []
+        self.errors = []
         # The fixed offset from the chassis frame {b} to the base frame of the arm {0}
         self.Tb0 = np.array([[1, 0, 0, 0.1662],
                              [0, 1, 0, 0     ],
@@ -94,41 +96,31 @@ class youBot:
     ##
     ## BODY MOVEMENT
     ##                
-    def q_step(self, Tsb, speeds, dt, speed_limit):        
+    def q_step(self, phi, speeds, dt):        
+
+        Vb = (self.r/4)*np.array([[-1/(self.l+self.w), 1/(self.l+self.w), 1/(self.l+self.w), -1/(self.l+self.w)],
+                                  [                 1,                 1,                 1,                  1],
+                                  [                -1,                 1,                -1,                  1]]) @ (speeds[5:]*dt)
+        # Vb6 = np.array([0, 0, Vb[0], Vb[1], Vb[2], 0])
+        # se_matrix = mr.VecTose3(Vb6) 
+        # T = mr.MatrixExp6(se_matrix)
+        # Tsb_adv = Tsb @ T
         
-        H0 = (1/self.r)*np.array([[-self.l-self.w, 1, -1],
-                                  [ self.l+self.w, 1,  1],
-                                  [ self.l+self.w, 1, -1],
-                                  [-self.l-self.w, 1,  1]])
-        
-        H0_pinverse = np.linalg.pinv(H0, 1e-4)
-        speeds = np.clip(speeds, speed_limit[0], speed_limit[1])
-        
-        Vb = H0_pinverse @ (speeds[5:]*dt)
-        Vb6 = np.array([0, 0, Vb[0], Vb[1], Vb[2], 0])
-        se_matrix = mr.VecTose3(Vb6)
-        T = mr.MatrixExp6(se_matrix)
-        Tsb_adv = Tsb @ T
-        
-        if Vb[0] == 0.0:        
+        if np.round(Vb[0], decimals=1) == 0.0:        
             deltaqb = np.array([0,Vb[1],Vb[2]])
         else:
             deltaqb = np.array([Vb[0], (Vb[1]*np.sin(Vb[0]) + Vb[2]*(np.cos(Vb[0])-1))/Vb[0],
                                 (Vb[2]*np.sin(Vb[0]) + Vb[1]*(1-np.cos(Vb[0])))/Vb[0]])
-        phi = np.arccos(Tsb_adv[0][0])
+        
         deltaq = np.array([[1,0,0],[0,np.cos(phi),-np.sin(phi)],[0,np.sin(phi),np.cos(phi)]]) @ deltaqb
         
         return deltaq
     
     def NextState(self, robot_config, speeds, dt, speed_limit=[-5.,5.], gripper=0):
 
-        # The fixed offset from the chassis frame {b} to the base frame of the arm {0} is
-        Tsb = np.array([[np.cos(robot_config[0]), -np.sin(robot_config[0]),    0,  robot_config[1]],
-                        [np.sin(robot_config[0]),  np.cos(robot_config[0]),    0,  robot_config[2]],
-                        [                      0,                        0,    1,           self.z],
-                        [                      0,                        0,    0,                1]])        
-        
-        deltaq = self.q_step(Tsb, speeds, dt, speed_limit)
+        speeds = np.clip(speeds, speed_limit[0], speed_limit[1])
+        phi = robot_config[0]
+        deltaq = self.q_step(phi, speeds, dt)
         
         q = robot_config[0:3]
         J = robot_config[3:8]
@@ -158,7 +150,7 @@ class youBot:
     def TrajectoryGenerator(self, k = 1):
     
         N = (2*k/0.01)
-        Tf = 10
+        Tf = 20
         Tf_open_close = 0.625
         line = []
         teta = 0
@@ -305,7 +297,8 @@ class youBot:
         Adxxd = Ad @ Vd
         xerr = self.calculateXerr(x,xd)
         
-        V = Adxxd + kp @ xerr + ki @ (xerr*dt)
+        self.integral += (xerr*dt)
+        V = Adxxd + kp @ xerr + ki @ self.integral
         
         Je = self.calculateJe(robot_config)
        
@@ -334,12 +327,15 @@ class youBot:
     def feedforward(self, Kp, Ki):
         if os.path.isfile('body.csv'):
             os.remove('body.csv')
-        robot_configs = []
-        errors = []
         trajectory = self.TrajectoryGenerator()
         new_robot_config = self.robot_config
-        X = mr.FKinBody(self.M0e, self.blist,new_robot_config[3:8])
         for ii in range(len(trajectory)-1):
+            Tsb = np.array([[np.cos(new_robot_config[0]), -np.sin(new_robot_config[0]),    0,  new_robot_config[1]],
+                            [np.sin(new_robot_config[0]),  np.cos(new_robot_config[0]),    0,  new_robot_config[2]],
+                            [                      0,                        0,    1,           self.z],
+                            [                      0,                        0,    0,                1]])
+            X = Tsb @ self.Tb0 @ mr.FKinBody(self.M0e, self.blist, new_robot_config[3:8])
+
             Xd = np.array([[trajectory[ii][0], trajectory[ii][1], trajectory[ii][2], trajectory[ii][9]],
                            [trajectory[ii][3], trajectory[ii][4], trajectory[ii][5], trajectory[ii][10]],
                            [trajectory[ii][6], trajectory[ii][7], trajectory[ii][8], trajectory[ii][11]],
@@ -353,12 +349,12 @@ class youBot:
             gripper = trajectory[ii][-1]
 
             Xerr, V, ut = self.FeedbackControl(new_robot_config, X,Xd,Xd_next,Kp,Ki,0.01)
-            new_robot_config = self.NextState(new_robot_config, ut, dt=0.01, gripper=gripper)
-            X = mr.FKinBody(self.M0e, self.blist, new_robot_config[3:8])
-            robot_configs.append(new_robot_config)
-            errors.append(Xerr)
+            new_robot_config = self.NextState(new_robot_config, ut, dt=0.01, gripper=gripper, speed_limit=[-5.,5.])
 
-        self.write_control(robot_configs, 'control.csv')
+            self.robot_configs.append(new_robot_config)
+            self.errors.append(Xerr)
+
+        self.write_control(self.robot_configs, 'control.csv')
 
 def test_next_state():
     if os.path.isfile('body.csv'):
@@ -385,10 +381,10 @@ def test_trajectory_generator():
     robot.TrajectoryGenerator()
 
 def test_feedbackcontrol():
-    robot_config01 = np.array([0,0,0,0,0,0.2,-1.6,0, -np.pi/4, np.pi/4, -np.pi/4, np.pi/4])
-    robot_config02 = np.zeros((12,))
+    robot_config = np.array([0,0,0,0,0,0.2,-1.6,0, -np.pi/4, np.pi/4, -np.pi/4, np.pi/4])
+    #robot_config = np.zeros((12,))
 
-    robot = youBot(initial_youBot_conf=robot_config01)
+    robot = youBot(initial_youBot_conf=robot_config)
 
     Xd = np.array([[0, 0, 1,   0.5],
                 [0,  1, 0,    0],
@@ -400,12 +396,17 @@ def test_feedbackcontrol():
                         [-1, 0, 0,  0.3],
                         [ 0, 0, 0,    1]])
 
-    X = np.array([[ 0.170,  0, 0.985,   0.387],
-                [     0,  1,     0,       0],
-                [-0.985,  0, 0.170,   0.570],
-                [     0,  0,     0,       1]])
+    Tb0 = np.array([[1, 0, 0, 0.1662],
+                    [0, 1, 0, 0     ],
+                    [0, 0, 1, 0.0026],
+                    [0, 0, 0, 1     ]])
 
-    #X = mr.FKinBody(robot.M0e, robot.blist,robot_config01[3:8])
+    Tsb = np.array([[np.cos(robot_config[0]), -np.sin(robot_config[0]),    0,  robot_config[1]],
+                    [np.sin(robot_config[0]),  np.cos(robot_config[0]),    0,  robot_config[2]],
+                    [                      0,                        0,    1,           0.0963],
+                    [                      0,                        0,    0,                1]])
+
+    X = Tsb @ Tb0 @ mr.FKinBody(robot.M0e, robot.blist,robot_config[3:8])
     kp1 = np.zeros((6,6))
     kp2 = np.eye(6)
     ki = np.zeros((6,6))
@@ -417,12 +418,12 @@ def test_feedbackcontrol():
     
     V = Ad @ Vd + kp1 @ xerr + ki @ xerr*dt
     
-    Je = robot.calculateJe(robot_config01)
+    Je = robot.calculateJe(robot_config)
     
     printdata(Vd, Ad, V, xerr, Je)
 
     print('\n* u teta_p\n')
-    xerr, V, ut = robot.FeedbackControl(robot_config01, X, Xd, Xd_next, kp1, ki, dt)
+    xerr, V, ut = robot.FeedbackControl(robot_config, X, Xd, Xd_next, kp1, ki, dt)
     print(ut)
 
 def test_feedforward():
@@ -431,7 +432,7 @@ def test_feedforward():
 
     robot = youBot(initial_youBot_conf=robot_config01)  
     kp1 = np.zeros((6,6))
-    kp2 = 0.025*np.eye(6)
+    kp2 = np.eye(6)
     ki = np.zeros((6,6))
     ki2 = 10*np.eye(6)
 
