@@ -96,31 +96,37 @@ class youBot:
     ##
     ## BODY MOVEMENT
     ##                
-    def q_step(self, phi, speeds, dt):        
+    def q_step(self, robot_config, speeds, dt):
+
+        # Tsb = np.array([[np.cos(robot_config[0]), -np.sin(robot_config[0]),    0,  robot_config[1]],
+        #                 [np.sin(robot_config[0]),  np.cos(robot_config[0]),    0,  robot_config[2]],
+        #                 [                      0,                        0,    1,           self.z],
+        #                 [                      0,                        0,    0,                1]])
 
         Vb = (self.r/4)*np.array([[-1/(self.l+self.w), 1/(self.l+self.w), 1/(self.l+self.w), -1/(self.l+self.w)],
                                   [                 1,                 1,                 1,                  1],
                                   [                -1,                 1,                -1,                  1]]) @ (speeds[5:]*dt)
+
         # Vb6 = np.array([0, 0, Vb[0], Vb[1], Vb[2], 0])
         # se_matrix = mr.VecTose3(Vb6) 
-        # T = mr.MatrixExp6(se_matrix)
-        # Tsb_adv = Tsb @ T
-        
-        if np.round(Vb[0], decimals=1) == 0.0:        
+        # Tbb = mr.MatrixExp6(se_matrix)
+        # Tsb_adv = Tsb @ Tbb
+
+        if Vb[0] == 0.0:        
             deltaqb = np.array([0,Vb[1],Vb[2]])
         else:
             deltaqb = np.array([Vb[0], (Vb[1]*np.sin(Vb[0]) + Vb[2]*(np.cos(Vb[0])-1))/Vb[0],
                                 (Vb[2]*np.sin(Vb[0]) + Vb[1]*(1-np.cos(Vb[0])))/Vb[0]])
-        
+
+        phi = robot_config[0]
         deltaq = np.array([[1,0,0],[0,np.cos(phi),-np.sin(phi)],[0,np.sin(phi),np.cos(phi)]]) @ deltaqb
-        
+
         return deltaq
     
-    def NextState(self, robot_config, speeds, dt, speed_limit=[-5.,5.], gripper=0):
+    def NextState(self, robot_config, speeds, dt, speed_limit, gripper=0):
 
         speeds = np.clip(speeds, speed_limit[0], speed_limit[1])
-        phi = robot_config[0]
-        deltaq = self.q_step(phi, speeds, dt)
+        deltaq = self.q_step(robot_config, speeds, dt)
         
         q = robot_config[0:3]
         J = robot_config[3:8]
@@ -147,15 +153,19 @@ class youBot:
             arr = np.hstack((rot,trans, [gripper_state]))
             line.append(arr)
 
-    def TrajectoryGenerator(self, k = 1):
+    def TrajectoryGenerator(self, dt, k = 1):
     
-        N = (2*k/0.01)
-        Tf = 20
+        N = k/dt
+        Tf = 10
         Tf_open_close = 0.625
         line = []
         teta = 0
 
         Tse_initial = mr.FKinBody(self.M0e, self.blist, self.robot_config[3:8])
+        # Tse_initial = np.array([[ 0,  0,  1,    0],
+        #                         [ 0,  1,  0,    0],
+        #                         [-1, 0,   0,  0.5],
+        #                         [ 0,  0,  0,    1]])
         Rtse,_ = mr.TransToRp(Tse_initial)
         pstd = np.array([self.init_cube_config[0], self.init_cube_config[1], self.init_cube_config[2] + 0.2])
 
@@ -167,7 +177,7 @@ class youBot:
         Tce_standoff = mr.RpToTrans(Rstd_final,pstd)
 
         Tce_grasp = np.copy(Tce_standoff)
-        Tce_grasp[2][3] = self.init_cube_config[2] - 0.08
+        Tce_grasp[2][3] = self.init_cube_config[2] - 0.07
 
         Rstd2 = np.array([[ np.cos(self.desired_cube_config[3]), -np.sin(self.desired_cube_config[3]), 0],
                           [ np.sin(self.desired_cube_config[3]),  np.cos(self.desired_cube_config[3]), 0],
@@ -178,39 +188,39 @@ class youBot:
         Tce_standoff2 = mr.RpToTrans(R, p)
 
         Tce_grasp2 = np.copy(Tce_standoff2)
-        Tce_grasp2[2][3] = self.desired_cube_config[2] - 0.08
+        Tce_grasp2[2][3] = self.desired_cube_config[2] - 0.07
 
         # A trajectory to move the gripper from its initial configuration to a "standoff"
         # configuration a few cm above the block.
-        traj_1 = mr.ScrewTrajectory(Tse_initial, Tce_standoff, Tf, N, 3)
+        traj_1 = mr.ScrewTrajectory(Tse_initial, Tce_standoff, Tf, 2*N, 3)
         self.vector(traj_1, line, 0)
         
         # A trajectory to move the gripper down to the grasp position.
-        traj_2 = mr.ScrewTrajectory(Tce_standoff, Tce_grasp, Tf, N, 3)
+        traj_2 = mr.ScrewTrajectory(Tce_standoff, Tce_grasp, Tf, 2*N, 3)
         self.vector(traj_2, line, 0)
         
         # Closing of the gripper.
-        Traj_3 = mr.ScrewTrajectory(Tce_grasp, Tce_grasp, Tf_open_close, N, 3)
+        Traj_3 = mr.ScrewTrajectory(Tce_grasp, Tce_grasp, Tf_open_close, 0.6*N, 3)
         self.vector(Traj_3, line, 1)
         
         # A trajectory to move the gripper back up to the "standoff" configuration.
-        traj_4 = mr.ScrewTrajectory(Tce_grasp, Tce_standoff, Tf, N, 3)
+        traj_4 = mr.ScrewTrajectory(Tce_grasp, Tce_standoff, Tf, 2*N, 3)
         self.vector(traj_4, line, 1)
         
         # A trajectory to move the gripper to a "standoff" configuration above the final configuration.
-        traj_5 = mr.ScrewTrajectory(Tce_standoff, Tce_standoff2, Tf, N, 3)
+        traj_5 = mr.ScrewTrajectory(Tce_standoff, Tce_standoff2, Tf, 8*N, 3)
         self.vector(traj_5, line, 1)
         
         # A trajectory to move the gripper to the final configuration of the object.
-        traj_6 = mr.ScrewTrajectory(Tce_standoff2, Tce_grasp2, Tf, N, 3)
+        traj_6 = mr.ScrewTrajectory(Tce_standoff2, Tce_grasp2, Tf, 2*N, 3)
         self.vector(traj_6, line, 1)
         
         # Opening of the gripper.
-        traj_7 = mr.ScrewTrajectory(Tce_grasp2, Tce_grasp2, Tf_open_close, N, 3)
+        traj_7 = mr.ScrewTrajectory(Tce_grasp2, Tce_grasp2, Tf_open_close, 0.6*N, 3)
         self.vector(traj_7, line, 0)
         
         # A trajectory to move the gripper back to the "standoff" configuration.
-        traj_8 = mr.ScrewTrajectory(Tce_grasp2, Tce_standoff2, Tf, N, 3)
+        traj_8 = mr.ScrewTrajectory(Tce_grasp2, Tce_standoff2, Tf, 2*N, 3)
         self.vector(traj_8, line, 0)
         
         self.write_result_end_effector(line)
@@ -229,7 +239,7 @@ class youBot:
         
         Xerr = mr.se3ToVec(se3mat) 
         
-        return np.round(Xerr, decimals=3)
+        return Xerr
     
     def calculateVd(self,xd, xd_next, dt):
         
@@ -297,13 +307,13 @@ class youBot:
         Adxxd = Ad @ Vd
         xerr = self.calculateXerr(x,xd)
         
-        self.integral += (xerr*dt)
-        V = Adxxd + kp @ xerr + ki @ self.integral
+        #self.integral += (xerr*dt)
+        V = Adxxd + kp @ xerr + ki @ xerr*dt
         
         Je = self.calculateJe(robot_config)
        
         Je_pinv = np.linalg.pinv(Je, 1e-4)
-        ut = np.round(Je_pinv @ V, decimals=1)
+        ut = Je_pinv @ V
 
         # Je, violeted = self.testJoinLimits(Je, ut, dt)
         # if violeted:
@@ -324,10 +334,10 @@ class youBot:
         
         return Je, violeted
 
-    def feedforward(self, Kp, Ki):
+    def feedforward(self, Kp, Ki, dt):
         if os.path.isfile('body.csv'):
             os.remove('body.csv')
-        trajectory = self.TrajectoryGenerator()
+        trajectory = self.TrajectoryGenerator(dt)
         new_robot_config = self.robot_config
         for ii in range(len(trajectory)-1):
             Tsb = np.array([[np.cos(new_robot_config[0]), -np.sin(new_robot_config[0]),    0,  new_robot_config[1]],
@@ -348,8 +358,8 @@ class youBot:
 
             gripper = trajectory[ii][-1]
 
-            Xerr, V, ut = self.FeedbackControl(new_robot_config, X,Xd,Xd_next,Kp,Ki,0.01)
-            new_robot_config = self.NextState(new_robot_config, ut, dt=0.01, gripper=gripper, speed_limit=[-5.,5.])
+            Xerr, V, ut = self.FeedbackControl(new_robot_config, X,Xd,Xd_next,Kp,Ki,dt)
+            new_robot_config = self.NextState(new_robot_config, ut, dt=dt, gripper=gripper, speed_limit=[-5.,5.])
 
             self.robot_configs.append(new_robot_config)
             self.errors.append(Xerr)
@@ -367,9 +377,9 @@ def test_next_state():
     velocity2 = np.array([0, 0, 0, 0, 0, -10,10,-10,10])
     velocity3 = np.array([0, 0, 0, 0, 0, -10,10,10,-10])
     robot = youBot(initial_youBot_conf=robot_config02)
-    sim = int(1/0.01)
+    sim = 100
     for _ in range(sim):
-        robot_config02 = robot.NextState(robot_config= robot_config02, speeds=velocity1, dt=0.01)
+        robot_config02 = robot.NextState(robot_config= robot_config02, speeds=velocity3, speed_limit=[-15.,15.], dt=0.01)
 
 def test_trajectory_generator():
     # chassis phi, chassis x, chassis y, J1, J2, J3, J4, J5, W1, W2, W3, W4
@@ -426,17 +436,17 @@ def test_feedbackcontrol():
     xerr, V, ut = robot.FeedbackControl(robot_config, X, Xd, Xd_next, kp1, ki, dt)
     print(ut)
 
-def test_feedforward():
+def test_feedforward(dt):
     robot_config01 = np.array([0,0,0,0,0,0,-np.pi/2,0, -np.pi/4, np.pi/4, -np.pi/4, np.pi/4])
     robot_config02 = np.zeros((12,))
 
     robot = youBot(initial_youBot_conf=robot_config01)  
     kp1 = np.zeros((6,6))
-    kp2 = np.eye(6)
+    kp2 = 0.01*np.eye(6)
     ki = np.zeros((6,6))
-    ki2 = 10*np.eye(6)
+    ki2 = 0.0025*np.eye(6)
 
-    robot.feedforward(kp1,ki)
+    robot.feedforward(kp1,ki, dt)
 
 def printdata(Vd, Ad, V, xerr, Je):
     print('* Vd\n')
@@ -450,4 +460,15 @@ def printdata(Vd, Ad, V, xerr, Je):
     print('\n* Je\n')
     print(np.round(Je, decimals=3))    
 
-test_feedforward()
+#test_feedforward(dt=0.01)
+init_cube_config = [1.0, 0.0, 0.0]
+desired_cube_config=[0., -1., 0.025, -np.pi/2] 
+initial_youBot_conf=np.array([0,0,0,0,0,0,-np.pi/2,0, -np.pi/4, np.pi/4, -np.pi/4, np.pi/4])
+
+kp1 = np.zeros((6,6))
+kp2 = 1.0*np.eye(6)
+ki = np.zeros((6,6))
+ki2 = 0.0025*np.eye(6)
+
+robot = youBot(init_cube_config=init_cube_config, desired_cube_config=desired_cube_config,initial_youBot_conf=initial_youBot_conf)
+robot.feedforward(kp1, ki, 0.01)
