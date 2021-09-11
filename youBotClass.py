@@ -12,6 +12,7 @@ import csv
 import os
 
 from numpy.core.numeric import indices
+import matplotlib.pyplot as plt
 
 class youBot:
     
@@ -308,7 +309,7 @@ class youBot:
         xerr = self.calculateXerr(x,xd)
         
         #self.integral += (xerr*dt)
-        V = Adxxd + kp @ xerr + ki @ xerr*dt
+        V = Adxxd + kp @ xerr + ki @ (xerr*dt)
         
         Je = self.calculateJe(robot_config)
        
@@ -458,7 +459,13 @@ def printdata(Vd, Ad, V, xerr, Je):
     print('\n* Xerr\n' )
     print(xerr)
     print('\n* Je\n')
-    print(np.round(Je, decimals=3))    
+    print(np.round(Je, decimals=3))
+
+def print_Xerr (Xerror):
+
+    v_errors = np.asarray(Xerror)
+    plt.plot(range(len(v_errors[:,0])), v_errors)
+    plt.show()
 
 #test_feedforward(dt=0.01)
 init_cube_config = [1.0, 0.0, 0.0]
@@ -472,3 +479,4 @@ ki2 = 0.0025*np.eye(6)
 
 robot = youBot(init_cube_config=init_cube_config, desired_cube_config=desired_cube_config,initial_youBot_conf=initial_youBot_conf)
 robot.feedforward(kp1, ki, 0.01)
+print_Xerr(robot.errors)
