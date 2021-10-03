@@ -60,7 +60,8 @@ class youBot:
         
         ## Cube
        
-        # These are written in SE(3) matrix
+        # These are written in SE(3) matrix and Inputs to Trajectory generation Function
+
         self.Tsc_initial = np.array([[1,  0,    0,  init_cube_config[0]],
                                      [0,  1,    0,  init_cube_config[1]],
                                      [0,  0,    1,  init_cube_config[2]],
@@ -70,25 +71,28 @@ class youBot:
                                   [-1, 0,    0,  desired_cube_config[1]],
                                   [0,  0,    1,  desired_cube_config[2]],
                                   [0,  0,    0,  1                   ]])
-        
-        teta = 2*np.pi/3.0
-        self.Tce_standoff = self.Tsc_initial @  np.array([[np.cos(teta),  0, np.sin(teta),         0.05],
-                                                     [           0,  1,            0,                 0],
-                                                     [-np.sin(teta), 0, np.cos(teta),               0.2],
-                                                     [            0, 0,            0,                 1]])
 
-        # Tce_standoff = self.Tsc_initial @ Tr_01                        
+        self.Tse_initial = np.array([[ 0,  0,  1,    0],
+                                [ 0,  1,  0,    0],
+                                [-1, 0,   0,  0.5],
+                                [ 0,  0,  0,    1]])        
+
+        teta = 2*np.pi/3.0
+
+        self.Tr = np.array([[np.cos(teta),  0, np.sin(teta),              0.02],
+                            [           0,  1,            0,                 0],
+                            [-np.sin(teta), 0, np.cos(teta),               0.2],
+                            [            0, 0,            0,                 1]])
+        
+        self.Tce_standoff = self.Tsc_initial @ self.Tr
 
         self.Tce_grasp = np.copy(self.Tce_standoff)
-        self.Tce_grasp[2][3] = self.Tsc_initial[2][3]
+        self.Tce_grasp[2][3] = self.Tsc_initial[2][3] + 0.025
 
-        self.Tce_standoff2 = self.Tsc_goal @ np.array([[np.cos(teta),  0, np.sin(teta),            0.05],
-                                                     [           0,  1,            0,            0],
-                                                     [-np.sin(teta), 0, np.cos(teta),          0.2],
-                                                     [            0, 0,            0,            1]])
+        self.Tce_standoff2 = self.Tsc_goal @ self.Tr
 
         self.Tce_grasp2 = np.copy(self.Tce_standoff2)
-        self.Tce_grasp2[2][3] = self.Tsc_goal[2][3]
+        self.Tce_grasp2[2][3] = self.Tsc_goal[2][3] + 0.025
 
     def write_result(self, results, filename):
         with open(filename, 'a', newline='') as csvfile:
@@ -96,6 +100,7 @@ class youBot:
             writer.writerow(results)
 
     def write_control(self, results, filename):
+        print("Generating animation csv file.")
         if os.path.isfile(filename):
             os.remove(filename)
         with open(filename, 'a', newline='') as csvfile:
@@ -110,6 +115,26 @@ class youBot:
             writer = csv.writer(csvfile, quoting=csv.QUOTE_MINIMAL)
             for result in results:
                 writer.writerow(result)
+
+    def write_xerror(self, filename):
+        print("Generating Xerr data file.")
+        if os.path.isfile(filename):
+            os.remove(filename)
+        data_error=open(filename,mode="a+",encoding="utf-8")
+        for xerror in self.errors:
+            data_error.write(str(xerror) + "\n")
+        data_error.close()
+
+    def print_Xerr (self, dt):
+        print("Ploting data Xerr.")
+        v_errors = np.asarray(self.errors)
+        values = np.arange(0, len(v_errors)*dt, dt)[:-1] 
+        plt.plot(values, v_errors)
+        plt.title('X error x Time')
+        plt.xlabel('time')
+        plt.legend(['wx','wy','wz','vx','vy','vz'])
+        plt.grid(True)
+        plt.show()
                 
     ##
     ## BODY MOVEMENT
@@ -162,17 +187,6 @@ class youBot:
             line.append(arr)
 
     def TrajectoryGenerator(self, dt, k = 1):
-        Tse_initial = np.array([[ 0,  0,  1,    0],
-                                [ 0,  1,  0,    0],
-                                [-1, 0,   0,  0.5],
-                                [ 0,  0,  0,    1]])
-
-        # Tsb = np.array([[np.cos(self.robot_config_ref[0]), -np.sin(self.robot_config_ref[0]),    0,  self.robot_config_ref[1]],
-        #                 [np.sin(self.robot_config_ref[0]),  np.cos(self.robot_config_ref[0]),    0,  self.robot_config_ref[2]],
-        #                 [                      0,                        0,    1,                                         0.5],
-        #                 [                      0,                        0,    0,                                           1]])
-        
-        # Tse_initial = Tsb @ self.Tb0 @ mr.FKinBody(self.M0e, self.blist, self.robot_config_ref[3:8])
         N = k/dt
         Tf = 10
         Tf_open_close = 0.625
@@ -180,7 +194,7 @@ class youBot:
 
         # A trajectory to move the gripper from its initial configuration to a "standoff"
         # configuration a few cm above the block.
-        traj_1 = mr.ScrewTrajectory(Tse_initial, self.Tce_standoff, Tf, 2*N, 3)
+        traj_1 = mr.ScrewTrajectory(self.Tse_initial, self.Tce_standoff, Tf, 2*N, 3)
         self.vector(traj_1, line, 0)
         
         # A trajectory to move the gripper down to the grasp position.
@@ -448,28 +462,23 @@ def printdata(Vd, Ad, V, xerr, Je):
     print('\n* Je\n')
     print(np.round(Je, decimals=3))
 
-def print_Xerr (Xerror, dt):
-    v_errors = np.asarray(Xerror)
-    values = np.arange(0, len(v_errors)*dt, dt)[:-1] 
-    plt.plot(values, v_errors)
-    plt.legend()
-    plt.grid(True)
-    plt.show()
+
 
 dt = 0.01
 kp1 = np.zeros((6,6))
-kp2 = 1.0*np.eye(6)
+kp2 = 0.83*np.eye(6)
 ki1 = np.zeros((6,6))
-ki2 = 1.0*np.eye(6)
+ki2 = 0.025*np.eye(6)
 
 # test_trajectory_generator(dt)
 # test_feedforward(dt)
-init_cube_config = [1.0, 0.0, 0.0]
+init_cube_config = [1.0, 0., 0.0]
 desired_cube_config = [0., -1., 0, -np.pi/2] 
-initial_youBot_conf=  np.array([0,0,0.2, 0,0,0,-np.pi/3.0, 0, -np.pi/4, np.pi/4, -np.pi/4, np.pi/4])
+initial_youBot_conf=  np.array([0,0,0.2, 0, 0,0,-np.pi/3.0, 0, -np.pi/4, np.pi/4, -np.pi/4, np.pi/4])
 ref_init_youBot =    np.array( [0, 0,  0, 0,0,0,         0, 0, -np.pi/4, np.pi/4, -np.pi/4, np.pi/4])
 
 robot = youBot(init_cube_config=init_cube_config, desired_cube_config=desired_cube_config,
                  initial_youBot_conf=initial_youBot_conf, ref_init_youBot=ref_init_youBot)
-robot.feedforward(kp2, ki1, dt)
-print_Xerr(robot.errors, dt)
+robot.feedforward(kp2, ki2, dt)
+robot.print_Xerr(dt)
+robot.write_xerror('Xerror_best.txt')
