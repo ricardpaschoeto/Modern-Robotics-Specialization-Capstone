@@ -14,6 +14,7 @@ The project is finalized, you can see the results inside the "results" folder.
 
 - Python 3.7
 - modern_robotics python library
+- Numpy library
 - IDE: VSCODE
 
 ## Approach
