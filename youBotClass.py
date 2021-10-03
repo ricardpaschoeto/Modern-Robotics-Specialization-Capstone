@@ -317,10 +317,10 @@ class youBot:
         Je_pinv = np.linalg.pinv(Je, 1e-4)
         ut = Je_pinv @ V
 
-        # Je, violeted = self.testJoinLimits(Je, ut, dt)
-        # if violeted:
-        #     Je_pinv = np.linalg.pinv(Je, 1e-4)
-        #     ut = np.round(Je_pinv @ V, decimals=1)            
+        Je, violeted = self.testJoinLimits(Je, ut, dt)
+        if violeted:
+            Je_pinv = np.linalg.pinv(Je, 1e-4)
+            ut = np.round(Je_pinv @ V, decimals=1)            
         
         return xerr, V, ut
     
