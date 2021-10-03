@@ -8,7 +8,7 @@ My first point to enroll in this Specialization is to get more confidence in rob
 
 ## Buid Status
 
-The project has 90 percent of code done and after I will prepare a report with results and analysis.
+The project is finalized, you can see the results inside the "results" folder.
 
 ## Python version
 
