@@ -20,3 +20,11 @@ The project is finalized, you can see the results inside the "results" folder.
 ## Approach
 
 To solve the problem I created a Class called "youBot" where each input from the main functions described in the project instructions became a member variable of the class and the constructor received the parameters defined in the beginning of the project instructons. I tried to build the project exactly that was describe in the instructions and for each Function was create a test to facilitate the debug process. I implemented the sigularity avoidance using the python function "np.linalg.pinv(m, 1e-4)". The joint limit avoidance was created but not tested and in this way I prefer to keep this part of code commented. My results were good and show up like expected.
+
+## Original Task
+
+![](https://github.com/ricardpaschoeto/Modern-Robotics-Specialization-Capstone/blob/main/Results/best/best_mp4.gif)
+
+## New Task (New block Position)
+
+![](https://github.com/ricardpaschoeto/Modern-Robotics-Specialization-Capstone/blob/main/Results/newTask/new_task_mp4.gif)
